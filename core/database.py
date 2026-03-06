@@ -25,6 +25,7 @@ async def add_raw_post(channel: str, text: str, img: str):
             (channel, text, img)
         )
         await db.commit()
+    print(f"Запись сохранена: {channel}")
 
 # ML/Logic
 async def get_unprocessed_posts():
@@ -42,7 +43,7 @@ async def update_post_data(post_id: int, price: int, category: str):
 
 # Bot
 async def search_items(category: str = None, max_price: int = None):
-    query = "SELECT source_channel, raw_text, image_url, price FROM items WHERE is_processed = 1"
+    query = "SELECT source_channel, raw_text, image_url, price FROM items WHERE 1=1"
     params = []
     
     if category:

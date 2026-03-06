@@ -1,14 +1,16 @@
-version: '3.8'
-
 services:
   bot:
-    build: .
-    container_name: fashion_daemon_bot
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: fashion_bot_main
     restart: always
     volumes:
       - .:/app
+      - ./data:/app/data
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-    command: python main.py
+      - PYTHONPATH=/app
+    command: python bot/main.py
