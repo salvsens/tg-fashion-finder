@@ -10,104 +10,78 @@ import asyncio
 from pathlib import Path
 
 # Добавляем корневую папку проекта в путь поиска модулей
-# Поднимаемся на два уровня вверх: ml_logic/ -> fashion-bot/
 root_dir = Path(__file__).parent.parent
 sys.path.append(str(root_dir))
 
-# Импортируем функции Леонида из папки bot
-from bot.database import get_unprocessed_posts, update_post_data
+print(f"📁 Корневая папка проекта: {root_dir}")
+print(f"📁 Текущая папка: {Path(__file__).parent}")
+
+try:
+    from bot.database import get_unprocessed_posts, update_post_data
+    print("✅ Модуль database успешно импортирован")
+except Exception as e:
+    print(f"❌ Ошибка импорта database: {e}")
+    print("   Проверь структуру папок:")
+    print("   - Есть ли папка bot/")
+    print("   - Есть ли файл bot/database.py")
+    print("   - Есть ли файл bot/__init__.py")
+    sys.exit(1)
 
 # ===== ТВОИ ФУНКЦИИ ОБРАБОТКИ =====
 
 def extract_price(text: str) -> int:
-    """
-    Извлекает цену из текста поста.
-    
-    Аргументы:
-        text: сырой текст поста
-        
-    Возвращает:
-        int: найденная цена или 0
-    """
+    """Извлекает цену из текста поста."""
     if not text:
         return 0
     
     text = text.lower()
+    print(f"   🔍 Ищем цену в: {text[:50]}...")
     
-    # Паттерны для поиска цены
     patterns = [
-        r'(\d+)[\s]?(?:₽|руб|рублей|рубля|р\.?)',           # 1500₽, 1500 руб
-        r'(?:₽|руб|рублей|рубля|р\.?)[\s]*(\d+)',           # ₽1500, руб1500
-        r'цена[:\s]*(\d+)',                                  # цена: 1500
-        r'(\d{3,6})\b',                                      # просто число от 100 до 999999
+        r'(\d+)[\s]?(?:₽|руб|рублей|рубля|р\.?)',
+        r'(?:₽|руб|рублей|рубля|р\.?)[\s]*(\d+)',
+        r'цена[:\s]*(\d+)',
+        r'(\d{3,6})\b',
     ]
     
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            # Находим группу с числом
             for group in match.groups():
                 if group and group.isdigit():
                     price = int(group)
-                    # Проверяем, что цена реалистичная
                     if 10 < price < 1000000:
+                        print(f"   ✅ Найдена цена: {price}")
                         return price
     
+    print(f"   ❌ Цена не найдена")
     return 0
 
 def detect_category(text: str) -> str:
-    """
-    Определяет категорию одежды по ключевым словам.
-    
-    Аргументы:
-        text: сырой текст поста
-        
-    Возвращает:
-        str: категория (shoes, hoodie, outerwear, pants, t-shirt, accessories, other)
-    """
+    """Определяет категорию одежды по ключевым словам."""
     if not text:
         return 'other'
     
     text_lower = text.lower()
+    print(f"   🔍 Ищем категорию в: {text[:50]}...")
     
-    # Словарь категорий с ключевыми словами
     categories = {
-        'shoes': [
-            'кеды', 'кроссовки', 'обувь', 'ботинки', 'туфли', 
-            'sneakers', 'converse', 'nike', 'adidas', 'new balance', 
-            'vans', 'найк', 'адидас', 'рибок'
-        ],
-        'hoodie': [
-            'худи', 'толстовка', 'свитшот', 'кофта', 'олимпийка', 
-            'hoodie', 'толстовка с капюшоном'
-        ],
-        'outerwear': [
-            'куртка', 'пуховик', 'пальто', 'ветровка', 'бомбер', 
-            'jacket', 'парка', 'косуха', 'зимняя куртка'
-        ],
-        'pants': [
-            'штаны', 'джинсы', 'брюки', 'чиносы', 'карго', 
-            'jeans', 'спортивные штаны'
-        ],
-        't-shirt': [
-            'футболка', 'майка', 'лонгслив', 'поло', 
-            't-shirt', 'футка', 'тенниска'
-        ],
-        'accessories': [
-            'шапка', 'кепка', 'шарф', 'ремень', 'сумка', 
-            'рюкзак', 'cap', 'перчатки', 'носки'
-        ]
+        'shoes': ['кеды', 'кроссовки', 'обувь', 'ботинки', 'туфли', 'sneakers', 'nike', 'adidas'],
+        'hoodie': ['худи', 'толстовка', 'свитшот', 'кофта', 'олимпийка', 'hoodie'],
+        'outerwear': ['куртка', 'пуховик', 'пальто', 'ветровка', 'бомбер', 'jacket'],
+        'pants': ['штаны', 'джинсы', 'брюки', 'чиносы', 'карго', 'jeans'],
+        't-shirt': ['футболка', 'майка', 'лонгслив', 'поло', 't-shirt'],
+        'accessories': ['шапка', 'кепка', 'шарф', 'ремень', 'сумка', 'рюкзак']
     }
     
-    # Считаем количество совпадений для каждой категории
-    matches = {category: 0 for category in categories}
+    matches = {cat: 0 for cat in categories}
     
     for category, keywords in categories.items():
         for keyword in keywords:
             if keyword in text_lower:
                 matches[category] += 1
+                print(f"   📌 Найдено ключевое слово '{keyword}' -> {category}")
     
-    # Выбираем категорию с наибольшим количеством совпадений
     best_category = 'other'
     max_matches = 0
     
@@ -116,181 +90,131 @@ def detect_category(text: str) -> str:
             max_matches = count
             best_category = category
     
+    if max_matches > 0:
+        print(f"   ✅ Определена категория: {best_category}")
+    else:
+        print(f"   ❌ Категория не определена, ставлю 'other'")
+    
     return best_category if max_matches > 0 else 'other'
-
-def extract_brand(text: str) -> str:
-    """
-    Определяет бренд (дополнительная функция).
-    """
-    if not text:
-        return ''
-    
-    text_lower = text.lower()
-    
-    brands = {
-        'nike': ['nike', 'найк', 'air force', 'air max', 'джордан'],
-        'adidas': ['adidas', 'адидас', 'yeezy', 'адик'],
-        'converse': ['converse', 'конверс', 'chuck taylor'],
-        'new balance': ['new balance', 'нью баланс', 'nb'],
-        'gucci': ['gucci', 'гучи'],
-        'balenciaga': ['balenciaga', 'баленсиага'],
-        'off-white': ['off-white', 'офф вайт', 'offwhite'],
-        'the north face': ['the north face', 'north face', 'tnf'],
-        'levis': ['levis', 'левис', 'levi\'s', 'ливайс'],
-    }
-    
-    for brand, keywords in brands.items():
-        for keyword in keywords:
-            if keyword in text_lower:
-                return brand
-    
-    return ''
-
-# ===== ГЛАВНАЯ ФУНКЦИЯ ОБРАБОТКИ =====
-
-async def process_all_posts():
-    """
-    Обрабатывает все необработанные посты в базе данных.
-    Запускать после того, как Влад нальет данные.
-    """
-    print("🔄 [ml_logic] Начинаю обработку постов...")
-    
-    try:
-        # Получаем необработанные посты через функцию Леонида
-        unprocessed = await get_unprocessed_posts()
-    except Exception as e:
-        print(f"❌ [ml_logic] Ошибка при получении постов: {e}")
-        print("   Проверь:")
-        print("   - Есть ли файл bot/database.py")
-        print("   - Создана ли база данных (запусти сначала бота)")
-        print(f"   - Путь к корню проекта: {root_dir}")
-        return
-    
-    if not unprocessed:
-        print("✅ [ml_logic] Нет необработанных постов!")
-        return
-    
-    print(f"📊 [ml_logic] Найдено {len(unprocessed)} постов для обработки")
-    
-    # Статистика
-    stats = {
-        'total': len(unprocessed),
-        'with_price': 0,
-        'by_category': {}
-    }
-    
-    processed = 0
-    for post_id, raw_text in unprocessed:
-        try:
-            # Твоя магия обработки
-            price = extract_price(raw_text)
-            category = detect_category(raw_text)
-            
-            # Сохраняем результат через функцию Леонида
-            await update_post_data(post_id, price, category)
-            
-            # Собираем статистику
-            if price > 0:
-                stats['with_price'] += 1
-            
-            stats['by_category'][category] = stats['by_category'].get(category, 0) + 1
-            
-        except Exception as e:
-            print(f"❌ [ml_logic] Ошибка при обработке поста {post_id}: {e}")
-        
-        processed += 1
-        if processed % 10 == 0:
-            print(f"⏳ [ml_logic] Обработано {processed}/{len(unprocessed)}...")
-    
-    # Выводим статистику
-    print("\n" + "="*50)
-    print("📊 [ml_logic] ОТЧЕТ ОБ ОБРАБОТКЕ")
-    print("="*50)
-    print(f"✅ Всего обработано: {stats['total']} постов")
-    print(f"💰 Найдена цена: {stats['with_price']} постов ({stats['with_price']/stats['total']*100:.1f}%)")
-    
-    if stats['by_category']:
-        print("\n📦 Распределение по категориям:")
-        for cat, count in sorted(stats['by_category'].items(), key=lambda x: x[1], reverse=True):
-            print(f"  {cat}: {count} ({count/stats['total']*100:.1f}%)")
-    print("="*50)
 
 # ===== ТЕСТОВАЯ ФУНКЦИЯ =====
 
 async def test_on_samples():
-    """Тестирует функции на примерах текстов."""
+    """Тестирует функции на примерах."""
     
     test_samples = [
-        {
-            'text': "🔥 Nike Air Force 1 Low\nРазмеры: 41-45\nЦена: 8900₽\nНовые, оригинал",
-            'expected_price': 8900,
-            'expected_category': 'shoes'
-        },
-        {
-            'text': "🧥 Зимний пуховик The North Face\nЦена: 15000 рублей\nРазмер M\nСамовывоз",
-            'expected_price': 15000,
-            'expected_category': 'outerwear'
-        },
-        {
-            'text': "👕 Футболка Off-White\nНовая, с бирками\n1500₽",
-            'expected_price': 1500,
-            'expected_category': 't-shirt'
-        },
-        {
-            'text': "📦 Adidas Yeezy Boost 350\nРазмер 43\nЦена: 18000 руб.",
-            'expected_price': 18000,
-            'expected_category': 'shoes'
-        },
-        {
-            'text': "🛍 Джинсы Levi's 511\nБ/у, состояние отличное\n800 рублей",
-            'expected_price': 800,
-            'expected_category': 'pants'
-        },
-        {
-            'text': "Шапка вязаная\nНовая\n500 руб",
-            'expected_price': 500,
-            'expected_category': 'accessories'
-        }
+        "🔥 Nike Air Force 1 Low\nЦена: 8900₽",
+        "🧥 Пуховик The North Face\n15000 рублей",
+        "👕 Футболка Off-White\n1500₽",
+        "📦 Adidas Yeezy\nЦена: 18000 руб.",
+        "🛍 Джинсы Levi's\n800 рублей",
+        "Шапка вязаная\n500 руб"
     ]
     
-    print("\n🧪 [ml_logic] ТЕСТИРОВАНИЕ ФУНКЦИЙ")
+    print("\n" + "="*60)
+    print("🧪 ТЕСТИРОВАНИЕ ФУНКЦИЙ НА ПРИМЕРАХ")
     print("="*60)
     
-    success = 0
-    for i, sample in enumerate(test_samples, 1):
-        text = sample['text']
-        expected_price = sample['expected_price']
-        expected_category = sample['expected_category']
-        
+    for i, text in enumerate(test_samples, 1):
+        print(f"\n{i}. Тестовый текст: {text}")
         price = extract_price(text)
         category = detect_category(text)
-        
-        price_ok = price == expected_price
-        category_ok = category == expected_category
-        
-        print(f"\n{i}. Текст: {text[:50]}...")
-        print(f"   Цена: {price} руб. (ожидалось: {expected_price}) {'✅' if price_ok else '❌'}")
-        print(f"   Категория: {category} (ожидалось: {expected_category}) {'✅' if category_ok else '❌'}")
-        
-        if price_ok and category_ok:
-            success += 1
+        print(f"   ИТОГ: цена={price}, категория={category}")
     
     print("\n" + "="*60)
-    print(f"✅ Тестов пройдено: {success}/{len(test_samples)}")
+    print("✅ Тестирование завершено")
     print("="*60)
+
+# ===== ПРОВЕРКА БАЗЫ ДАННЫХ =====
+
+async def check_database():
+    """Проверяет, есть ли что-то в базе данных."""
+    print("\n" + "="*60)
+    print("🔍 ПРОВЕРКА БАЗЫ ДАННЫХ")
+    print("="*60)
+    
+    # Проверяем существование файла базы данных
+    db_path = root_dir / "bot" / "data" / "fashion_bot.db"
+    print(f"📁 Путь к БД: {db_path}")
+    
+    if not db_path.exists():
+        print("❌ Файл базы данных не найден!")
+        print("   Возможные причины:")
+        print("   - База еще не создана (нужно запустить бота Леонида)")
+        print("   - Неправильный путь к БД")
+        return False
+    
+    print(f"✅ Файл БД найден, размер: {db_path.stat().st_size} байт")
+    
+    # Проверяем, есть ли необработанные посты
+    try:
+        unprocessed = await get_unprocessed_posts()
+        print(f"📊 Найдено необработанных постов: {len(unprocessed)}")
+        
+        if len(unprocessed) == 0:
+            print("\n💡 ПОЧЕМУ НЕТ ПОСТОВ:")
+            print("   1. Влад еще не запустил парсер")
+            print("   2. В переменной CHANNEL_IDS нет каналов")
+            print("   3. База пустая (нужно подождать данных от Влада)")
+            print("\n💡 ЧТО ДЕЛАТЬ:")
+            print("   - Спроси у Влада, запустил ли он парсер")
+            print("   - Попроси Леонида добавить тестовые данные")
+            print("   - Или подожди, пока ребята настроят свои части")
+        
+        return unprocessed
+    except Exception as e:
+        print(f"❌ Ошибка при запросе к БД: {e}")
+        return False
+
+# ===== ГЛАВНАЯ ФУНКЦИЯ =====
+
+async def main():
+    """Главная функция."""
+    print("\n" + "="*60)
+    print("🚀 ЗАПУСК ML LOGIC PROCESSOR")
+    print("="*60)
+    
+    # Сначала тестируем функции
+    await test_on_samples()
+    
+    # Проверяем базу данных
+    unprocessed = await check_database()
+    
+    if unprocessed:
+        print(f"\n📊 Начинаю обработку {len(unprocessed)} постов...")
+        
+        processed = 0
+        success = 0
+        
+        for post_id, raw_text in unprocessed:
+            print(f"\n--- Обработка поста ID: {post_id} ---")
+            print(f"Текст: {raw_text[:100]}..." if len(raw_text) > 100 else f"Текст: {raw_text}")
+            
+            try:
+                price = extract_price(raw_text)
+                category = detect_category(raw_text)
+                
+                await update_post_data(post_id, price, category)
+                print(f"✅ Пост {post_id} сохранен: price={price}, category={category}")
+                success += 1
+                
+            except Exception as e:
+                print(f"❌ Ошибка при обработке поста {post_id}: {e}")
+            
+            processed += 1
+        
+        print("\n" + "="*60)
+        print(f"📊 ИТОГИ ОБРАБОТКИ")
+        print("="*60)
+        print(f"✅ Обработано постов: {processed}")
+        print(f"✅ Успешно сохранено: {success}")
+        print("="*60)
+    else:
+        print("\n⏳ Нет данных для обработки. Ждем, пока Влад нальет посты в базу.")
+    
+    print("\n✅ Работа процессора завершена")
 
 # ===== ТОЧКА ВХОДА =====
 
 if __name__ == "__main__":
-    import platform
-    
-    print(f"🐍 Python: {platform.python_version()}")
-    print(f"📁 Папка проекта: {root_dir}")
-    print(f"📁 Твоя папка: {Path(__file__).parent}")
-    
-    asyncio.run(test_on_samples())
-    
-    print("\n" + "="*60)
-    
-    # Потом обрабатываем реальные посты
-    asyncio.run(process_all_posts())
+    asyncio.run(main())
