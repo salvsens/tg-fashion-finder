@@ -42,17 +42,25 @@ async def update_post_data(post_id: int, price: int, category: str):
         await db.commit()
 
 # Bot
-async def search_items(category: str = None, max_price: int = None):
-    query = "SELECT source_channel, raw_text, image_url, price FROM items WHERE 1=1"
-    params = []
-    
-    if category:
-        query += " AND category = ?"
-        params.append(category)
-    if max_price:
-        query += " AND price <= ?"
-        params.append(max_price)
-        
+async def search_items(search_query: str = None):
+    # Все айтемы из базы
+    query = "SELECT source_channel, raw_text, image_url, price FROM items ORDER BY id DESC"
+
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(query, params) as cursor:
-            return await cursor.fetchall()
+        async with db.execute(query) as cursor:
+            all_items = await cursor.fetchall()
+
+            if not search_query:
+                return all_items[:10]  # Если запроса нет, то 10 последних
+
+            # Фильтруем на Python
+            filtered = []
+            search_query = search_query.lower().strip()
+
+            for item in all_items:
+                # item[1] — raw_text
+                if search_query in item[1].lower():
+                    filtered.append(item)
+
+            print(f"DEBUG: Python нашел {len(filtered)} совпадений для '{search_query}'")
+            return filtered
