@@ -10,6 +10,6 @@
 ### Технологии:
 * `aiogram 3.x` (Telegram Bot API)
 * `Python / Asyncio`
-* `PostgreSQL` (через модуль database)
+* `aiosqlite`
 
 **Разработчик:** Владислав Бутенко
