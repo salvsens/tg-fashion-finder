@@ -1,12 +1,28 @@
 """
 Улучшенный модуль машинной логики для fashion-бота.
-С поддержкой нечёткого поиска, синонимов категорий и умным исправлением опечаток.
+С поддержкой NLTK (стемминг, токенизация, стоп-слова), нечёткого поиска и умным извлечением цены.
 """
 
 import sys
 import re
 from pathlib import Path
+
 from fuzzywuzzy import fuzz, process
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem.snowball import SnowballStemmer
+
+# Инициализация NLTK
+try:
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('tokenizers/punkt_tab')
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    print("Загрузка компонентов NLTK...")
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+    nltk.download('stopwords', quiet=True)
 
 root_dir = Path(__file__).parent.parent
 sys.path.append(str(root_dir))
@@ -17,8 +33,10 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
-# ===== НОРМАЛИЗОВАННЫЕ КАТЕГОРИИ С СИНОНИМАМИ =====
-# Ключ – нормализованное имя категории, значение – список ключевых слов (включая синонимы на разных языках)
+# Инициализация стеммера для русского языка
+stemmer = SnowballStemmer("russian")
+
+# НОРМАЛИЗОВАННЫЕ КАТЕГОРИИ С СИНОНИМАМИ
 CATEGORY_SYNONYMS = {
     'shoes': [
         'кеды', 'кроссовки', 'обувь', 'ботинки', 'туфли', 'sneakers',
@@ -28,7 +46,7 @@ CATEGORY_SYNONYMS = {
     ],
     'hoodie': [
         'худи', 'толстовка', 'свитшот', 'кофта', 'олимпийка', 'hoodie',
-        'свитер', 'байка', 'свитшот', 'лонгслив'
+        'свитер', 'байка', 'лонгслив'
     ],
     'outerwear': [
         'куртка', 'пуховик', 'пальто', 'ветровка', 'бомбер', 'jacket',
@@ -41,8 +59,8 @@ CATEGORY_SYNONYMS = {
         'бермуды', 'брюки-клеш', 'слаксы'
     ],
     't-shirt': [
-        'футболка', 'майка', 'лонгслив', 'поло', 't-shirt', 'футка',
-        'тенниска', 'футболочка', 'футболка', 'топ', 'боди'
+        'футболка', 'майка', 'поло', 't-shirt', 'футка',
+        'тенниска', 'футболочка', 'топ', 'боди'
     ],
     'accessories': [
         'шапка', 'кепка', 'шарф', 'ремень', 'сумка', 'рюкзак',
@@ -51,16 +69,20 @@ CATEGORY_SYNONYMS = {
     ]
 }
 
-# Плоский список всех ключевых слов для быстрого нечёткого поиска
+# Плоские списки для поиска
 ALL_KEYWORDS = []
 KEYWORD_TO_CATEGORY = {}
+STEMMED_KEYWORD_TO_CATEGORY = {}
+
 for category, keywords in CATEGORY_SYNONYMS.items():
     for kw in keywords:
         ALL_KEYWORDS.append(kw)
         KEYWORD_TO_CATEGORY[kw] = category
+        stemmed_kw = " ".join([stemmer.stem(w) for w in kw.split()])
+        STEMMED_KEYWORD_TO_CATEGORY[stemmed_kw] = category
 
-# Стоп-слова (игнорируются при анализе)
-STOP_WORDS = {
+# Собственный стоп-слова
+CUSTOM_STOP_WORDS = {
     'продам', 'продажа', 'купить', 'цена', 'руб', '₽', 'рублей',
     'новый', 'новое', 'новая', 'новые', 'бу', 'б/у', 'used',
     'размер', 'размеры', 's', 'm', 'l', 'xl', 'xxl',
@@ -68,9 +90,11 @@ STOP_WORDS = {
     'качество', 'бренд', 'состояние', 'отличное', 'хорошее',
     'связь', 'наличие', 'тег', 'тел', 'viber', 'whatsapp', 'inst', 'instagram'
 }
+NLTK_STOP_WORDS = set(stopwords.words('russian'))
+COMBINED_STOP_WORDS = CUSTOM_STOP_WORDS.union(NLTK_STOP_WORDS)
 
 # Порог уверенности для нечёткого сравнения (0-100)
-FUZZY_THRESHOLD = 70
+FUZZY_THRESHOLD = 75
 
 def clean_text(text: str) -> str:
     """Очищает текст от мусора, эмодзи, ссылок и лишних символов."""
@@ -91,7 +115,8 @@ def clean_text(text: str) -> str:
                                "]+", flags=re.UNICODE)
     text = emoji_pattern.sub('', text)
 
-    # заменяем множественные пробелы
+    # замена знаков препинания на пробелы
+    text = re.sub(r'[^\w\s]', ' ', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
@@ -101,8 +126,6 @@ def extract_price(text: str) -> int:
         return 0
 
     text = text.lower()
-
-    # регулярки для поиска цен с валютой и без
     patterns = [
         r'(\d+)[\s]?(?:₽|руб|рублей|рубля|р\.?|руб\.)',
         r'(\d+)[\s]?(?:usd|\$|dollars?)',
@@ -113,7 +136,7 @@ def extract_price(text: str) -> int:
         r'цена[:\s]*(\d+)',
         r'стоит[:\s]*(\d+)',
         r'за\s*(\d+)',
-        r'\b(\d{3,7})\b',   # обычное число от 100 до 9.999.999
+        r'\b(\d{3,7})\b',
     ]
 
     for pattern in patterns:
@@ -130,10 +153,9 @@ def extract_price(text: str) -> int:
                 if 100 <= price <= 10000000:
                     return price
 
-    # если не нашли – берём самое большое число среди всех чисел >100
     numbers = re.findall(r'\b(\d+)\b', text)
     if numbers:
-        valid_prices = [int(n) for n in numbers if int(n) > 100 and int(n) < 10000000]
+        valid_prices = [int(n) for n in numbers if 100 < int(n) < 10000000]
         if valid_prices:
             return max(valid_prices)
 
@@ -142,12 +164,11 @@ def extract_price(text: str) -> int:
 def find_best_category_for_word(word: str) -> tuple:
     """
     Возвращает (категория, уверенность) для одного слова.
-    Использует нечёткое сравнение со всеми ключевыми словами всех категорий.
+    Использует нечёткое сравнение со всеми оригинальными ключевыми словами.
     """
-    if len(word) < 2 or word in STOP_WORDS:
+    if len(word) < 2:
         return None, 0
 
-    # ищем лучшее совпадение среди всех ключевых слов
     best = process.extractOne(word, ALL_KEYWORDS, scorer=fuzz.token_set_ratio)
     if not best:
         return None, 0
@@ -160,34 +181,43 @@ def find_best_category_for_word(word: str) -> tuple:
     return category, confidence
 
 def detect_category(text: str) -> str:
-    """Определяет категорию, агрегируя оценки по всем словам."""
+    """Определяет категорию, агрегируя оценки по всем словам (NLTK Tokenization + Stemming)."""
     if not text:
         return 'other'
 
-    cleaned = clean_text(text)
-    words = re.findall(r'\b[a-zA-Zа-яА-Я0-9]+\b', cleaned.lower())
+    cleaned = clean_text(text).lower()
 
-    # считаем очки для каждой категории
+    # NLTK Токенизация
+    words = word_tokenize(cleaned, language='russian')
+
     category_scores = {cat: 0 for cat in CATEGORY_SYNONYMS}
 
     for word in words:
-        if word in STOP_WORDS:
+        if not word.isalnum() or word in COMBINED_STOP_WORDS:
             continue
 
-        # точное совпадение с любым ключевым словом
-        if word in KEYWORD_TO_CATEGORY:
-            cat = KEYWORD_TO_CATEGORY[word]
+        # NLTK Стемминг
+        stemmed_word = stemmer.stem(word)
+
+        # 1. Проверка по стеммированной базе
+        if stemmed_word in STEMMED_KEYWORD_TO_CATEGORY:
+            cat = STEMMED_KEYWORD_TO_CATEGORY[stemmed_word]
             category_scores[cat] += 100
             continue
 
-        # нечёткое совпадение
+        # 2. Проверка точного вхождения оригинального слова
+        if word in KEYWORD_TO_CATEGORY:
+            cat = KEYWORD_TO_CATEGORY[word]
+            category_scores[cat] += 90
+            continue
+
+        # 3. Нечёткое совпадение для опечаток (самое ресурсоемкое)
         best_cat, confidence = find_best_category_for_word(word)
         if best_cat:
             category_scores[best_cat] += confidence
 
-    # выбираем категорию с наибольшим счётом
     best_category = 'other'
-    max_score = 30  # минимальный порог, чтобы не срабатывало от случайных совпадений
+    max_score = 40
 
     for cat, score in category_scores.items():
         if score > max_score:
@@ -205,6 +235,7 @@ def process_text(text: str):
 async def process_posts():
     """Обрабатывает все необработанные посты в базе данных."""
     if not DB_AVAILABLE:
+        print("База данных недоступна. Проверьте импорты.")
         return
 
     unprocessed = await get_unprocessed_posts()
@@ -215,7 +246,3 @@ async def process_posts():
         price = extract_price(raw_text)
         category = detect_category(raw_text)
         await update_post_data(post_id, price, category)
-
-if __name__ == "__main__":
-    # Функции доступны для импорта
-    pass
