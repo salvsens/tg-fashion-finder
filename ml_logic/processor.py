@@ -1,8 +1,3 @@
-"""
-Улучшенный модуль машинной логики для fashion-бота.
-С поддержкой NLTK (стемминг, токенизация, стоп-слова), нечёткого поиска и умным извлечением цены.
-"""
-
 import sys
 import re
 from pathlib import Path
@@ -12,6 +7,8 @@ import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem.snowball import SnowballStemmer
+
+from core.database import DB_PATH, get_unprocessed_posts, update_post_data
 
 # Инициализация NLTK
 try:
@@ -121,41 +118,45 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 def extract_price(text: str) -> int:
-    """Извлекает цену из текста, учитывая разные форматы."""
+    """Извлекает цену, очищая текст от мусора."""
     if not text:
         return 0
 
+    # Приводим к нижнему регистру и заменяем точки/запятые между цифрами
     text = text.lower()
+    text = re.sub(r'(?<=\d)[.,\s](?=\d{3})', '', text)
+
+    if any(word in text for word in ["продано", "sold", "забрали"]):
+        return 0
+
+    # 1. Ищем формат с "к"
+    k_match = re.search(r'(\d+[.,]?\d*)\s*[кk]\b', text)
+    if k_match:
+        try:
+            val = float(k_match.group(1).replace(',', '.'))
+            return int(val * 1000)
+        except: pass
+
+    # 2. Основные паттерны для валют
     patterns = [
-        r'(\d+)[\s]?(?:₽|руб|рублей|рубля|р\.?|руб\.)',
-        r'(\d+)[\s]?(?:usd|\$|dollars?)',
-        r'(\d+)[\s]?(?:eur|евро|€)',
-        r'(?:₽|руб|рублей|рубля|р\.?)[\s]*(\d+)',
-        r'(?:\$|usd)[\s]*(\d+)',
-        r'(?:€|eur|евро)[\s]*(\d+)',
-        r'цена[:\s]*(\d+)',
-        r'стоит[:\s]*(\d+)',
-        r'за\s*(\d+)',
-        r'\b(\d{3,7})\b',
+        r'(\d+)\s*(?:₽|руб|рублей|рубля|р|р\.|руб\.)',  # 2000р, 2000 р.
+        r'(?:₽|руб|р\.)\s*(\d+)',  # р 2000
+        r'(\d+)\s*(?:\$|usd|долларов)',  # 100$
+        r'(?:\$|usd)\s*(\d+)',  # $100
+        r'цена[:\s]*(\d+)',  # цена: 5000
     ]
 
     for pattern in patterns:
-        matches = re.findall(pattern, text)
-        for match in matches:
-            if isinstance(match, tuple):
-                for group in match:
-                    if group and group.isdigit():
-                        price = int(group)
-                        if 100 <= price <= 10000000:
-                            return price
-            elif match and match.isdigit():
-                price = int(match)
-                if 100 <= price <= 10000000:
-                    return price
+        match = re.search(pattern, text)
+        if match:
+            price = int(match.group(1))
+            if 100 <= price <= 1000000:
+                return price
 
-    numbers = re.findall(r'\b(\d+)\b', text)
+    # 3. Если ничего не нашли — ищем любое число от 500 до 500000
+    numbers = re.findall(r'\b(\d{3,6})\b', text)
     if numbers:
-        valid_prices = [int(n) for n in numbers if 100 < int(n) < 10000000]
+        valid_prices = [int(n) for n in numbers if 500 <= int(n) <= 500000]
         if valid_prices:
             return max(valid_prices)
 
@@ -234,15 +235,11 @@ def process_text(text: str):
 
 async def process_posts():
     """Обрабатывает все необработанные посты в базе данных."""
-    if not DB_AVAILABLE:
-        print("База данных недоступна. Проверьте импорты.")
-        return
-
     unprocessed = await get_unprocessed_posts()
-    if not unprocessed:
-        return
 
     for post_id, raw_text in unprocessed:
-        price = extract_price(raw_text)
-        category = detect_category(raw_text)
+        price, category = process_text(raw_text)
+
+        print(f"Обработка ID {post_id}: Цена={price}, Кат={category}")
+
         await update_post_data(post_id, price, category)

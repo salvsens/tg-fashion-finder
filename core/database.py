@@ -1,6 +1,9 @@
 import aiosqlite
+import os
 
-DB_PATH = "data/fashion_bot.db"
+# Определяем корень проекта
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "data", "fashion_bot.db")
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -8,6 +11,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_channel TEXT,
+                post_url TEXT,
                 raw_text TEXT,
                 image_url TEXT,
                 price INTEGER DEFAULT 0,
@@ -18,11 +22,11 @@ async def init_db():
         await db.commit()
 
 # Crawler
-async def add_raw_post(channel: str, text: str, img: str):
+async def add_raw_post(channel: str, text: str, img: str, post_url: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO items (source_channel, raw_text, image_url) VALUES (?, ?, ?)",
-            (channel, text, img)
+            "INSERT INTO items (source_channel, post_url, raw_text, image_url) VALUES (?, ?, ?, ?)",
+            (channel, post_url, text, img)
         )
         await db.commit()
     print(f"Запись сохранена: {channel}")
@@ -44,7 +48,7 @@ async def update_post_data(post_id: int, price: int, category: str):
 # Bot
 async def search_items(search_query: str = None):
     # Все айтемы из базы
-    query = "SELECT source_channel, raw_text, image_url, price FROM items ORDER BY id DESC"
+    query = "SELECT source_channel, post_url, raw_text, image_url, price FROM items ORDER BY id DESC"
 
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(query) as cursor:
@@ -58,9 +62,8 @@ async def search_items(search_query: str = None):
             search_query = search_query.lower().strip()
 
             for item in all_items:
-                # item[1] — raw_text
-                if search_query in item[1].lower():
+                # item[2] — raw_text
+                if item[2] and search_query in item[2].lower():
                     filtered.append(item)
 
-            print(f"DEBUG: Python нашел {len(filtered)} совпадений для '{search_query}'")
             return filtered
